@@ -11,7 +11,8 @@ var TEMPLATES_DIR = path.join(__dirname, '..', 'templates')
 var TEMPLATES = {
 	css: path.join(TEMPLATES_DIR, 'css.hbs'),
 	scss: path.join(TEMPLATES_DIR, 'scss.hbs'),
-	html: path.join(TEMPLATES_DIR, 'html.hbs')
+	html: path.join(TEMPLATES_DIR, 'html.hbs'),
+	symbol: path.join(TEMPLATES_DIR, 'symbol.hbs')
 }
 
 var DEFAULT_TEMPLATE_OPTIONS = {
@@ -24,12 +25,14 @@ var DEFAULT_OPTIONS = {
 	fontName: 'iconfont',
 	css: true,
 	cssTemplate: TEMPLATES.css,
+	cssContext: function (context, options, handlebars) {},
 	html: false,
 	htmlTemplate: TEMPLATES.html,
-	types: ['eot', 'woff', 'woff2'],
+	htmlContext: function (context, options, handlebars) {},
+	types: ['eot', 'woff', 'woff2', 'symbol'],
 	order: ['eot', 'woff2', 'woff', 'ttf', 'svg'],
-	rename: function(file) {
-		return path.basename(file, path.extname(file))
+	rename: function (file) {
+		return typeof file === 'string' ? path.basename(file, path.extname(file)) : file.metadata.name;
 	},
 	formatOptions: {},
 	/**
@@ -37,10 +40,11 @@ var DEFAULT_OPTIONS = {
 	 * http://en.wikipedia.org/wiki/Private_Use_(Unicode)
 	 */
 	startCodepoint: 0xF101,
+	ligature: true,
 	normalize: true
 }
 
-var webfont = function(options, done) {
+var webfont = function (options, done) {
 	if (options.cssFontsPath) {
 		console.log('Option "cssFontsPath" is deprecated. Use "cssFontsUrl" instead.')
 		options.cssFontsUrl = options.cssFontsPath
@@ -64,9 +68,9 @@ var webfont = function(options, done) {
 	}
 
 	// Warn about using deprecated template options.
-	for(var key in options.templateOptions) {
+	for (var key in options.templateOptions) {
 		var value = options.templateOptions[key];
-		if(key === "baseClass") {
+		if (key === "baseClass") {
 			console.warn("[webfont-generator] Using deprecated templateOptions 'baseClass'. Use 'baseSelector' instead.");
 			options.templateOptions.baseSelector = "." + value;
 			delete options.templateOptions.baseClass;
@@ -80,6 +84,7 @@ var webfont = function(options, done) {
 	// skipping codepoints explicitly specified in `options.codepoints`
 	var currentCodepoint = options.startCodepoint
 	var codepointsValues = _.values(options.codepoints)
+
 	function getNextCodepoint() {
 		while (_.contains(codepointsValues, currentCodepoint)) {
 			currentCodepoint++
@@ -88,7 +93,7 @@ var webfont = function(options, done) {
 		currentCodepoint++
 		return res
 	}
-	_.each(options.names, function(name) {
+	_.each(options.names, function (name) {
 		if (!options.codepoints[name]) {
 			options.codepoints[name] = getNextCodepoint()
 		}
@@ -96,15 +101,22 @@ var webfont = function(options, done) {
 
 	// TODO output
 	generateFonts(options)
-		.then(function(result) {
+		.then(function (result) {
 			if (options.writeFiles) writeResult(result, options)
 
-			result.generateCss = function(urls) {
+			result.generateHtml = function (urls) {
+				return renderHtml(options, urls)
+			}
+
+			result.generateCss = function (urls) {
 				return renderCss(options, urls)
 			}
+
 			done(null, result)
 		})
-		.catch(function(err) { done(err) })
+		.catch(function (err) {
+			done(err)
+		})
 }
 
 function writeFile(content, dest) {
@@ -113,7 +125,17 @@ function writeFile(content, dest) {
 }
 
 function writeResult(fonts, options) {
-	_.each(fonts, function(content, type) {
+	_.each(fonts, function (content, type) {
+		if (type === 'symbol') {
+			var filepath = path.join(options.dest, options.fontName + 'Symbol.svg')
+			writeFile(content, filepath)
+			// gen symbol script
+			var symbolSource = fs.readFileSync(TEMPLATES.symbol, 'utf8')
+			var symbolScript = symbolSource.replace('<% SVG_SYMBOL_CODE %>', content)
+			var symbolfilepath = path.join(options.dest, options.fontName + 'Symbol.js')
+			writeFile(symbolScript, symbolfilepath)
+			return;
+		}
 		var filepath = path.join(options.dest, options.fontName + '.' + type)
 		writeFile(content, filepath)
 	})

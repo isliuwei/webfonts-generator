@@ -6,7 +6,7 @@ var assert = require('assert')
 var sass = require('node-sass')
 var Q = require('q')
 var readChunk = require('read-chunk')
-var getFileType = require('file-type')
+var FileType = require('file-type')
 
 var webfontsGenerator = require('../src/index')
 
@@ -18,7 +18,7 @@ describe('webfont', function() {
 		return path.join(SRC, file)
 	})
 
-	var TYPES = ['ttf', 'woff', 'woff2', 'eot', 'svg']
+	var TYPES = ['ttf', 'woff', 'woff2', 'eot', 'symbol', 'svg']
 	var FONT_NAME = 'fontName'
 
 	var OPTIONS = {
@@ -36,13 +36,13 @@ describe('webfont', function() {
 	})
 
 	it('generates all fonts and css files', function(done) {
-		webfontsGenerator(OPTIONS, function(err) {
+		webfontsGenerator(OPTIONS, async function(err) {
 			if (err) return done(err)
 
 			var destFiles = fs.readdirSync(DEST)
 			for (var i in TYPES) {
 				var type = TYPES[i]
-				var filename = FONT_NAME + '.' + type
+				var filename = type === 'symbol' ? FONT_NAME + 'Symbol.svg' : FONT_NAME + '.' + type
 				var filepath = path.join(DEST, filename)
 				assert(destFiles.indexOf(filename) !== -1, type + ' file exists')
 				assert(fs.statSync(filepath).size > 0, type + ' file is not empty')
@@ -50,7 +50,7 @@ describe('webfont', function() {
 				var DETECTABLE = ['ttf', 'woff', 'woff2', 'eot']
 				if (_.contains(DETECTABLE, type)) {
 					var chunk = readChunk.sync(filepath, 0, 262)
-					var filetype = getFileType(chunk)
+					var filetype = await FileType.fromBuffer(chunk)
 					assert.equal(type, filetype && filetype.ext, 'ttf filetype is correct')
 				}
 			}
@@ -66,7 +66,7 @@ describe('webfont', function() {
 		})
 	})
 
-	it('returns object with fonts and function generateCss()', function() {
+	it('returns object with fonts and functions generateCss(), generateHtml()', function() {
 		webfontsGenerator(OPTIONS, function(err, result) {
 			assert(result.svg)
 			assert(result.ttf)
@@ -74,6 +74,10 @@ describe('webfont', function() {
 			assert.equal(typeof result.generateCss, 'function')
 			var css = result.generateCss()
 			assert.equal(typeof css, 'string')
+
+			assert.equal(typeof result.generateHtml, 'function')
+			var html = result.generateHtml()
+			assert.equal(typeof html, 'string')
 		})
 	})
 
@@ -140,6 +144,39 @@ describe('webfont', function() {
 		})
 	})
 
+	it('generates the same hash even when different "dest" is passed as an option', function(done) {
+		var getHash = function (dest) {
+			var cssFile = path.join(dest, FONT_NAME + '.css')
+			var css = fs.readFileSync(cssFile, {
+				encoding: 'UTF-8'
+			})
+			return css.match('.*' + FONT_NAME + '\\.\\w+\\?([\\da-f]{32}).*')[1]
+		}
+
+		var dest = DEST + 'some'
+		var options = _.extend({}, OPTIONS, {
+			dest: dest
+		})
+		webfontsGenerator(options, function(err) {
+			if (err) return done(new Error(err))
+
+			var hash = getHash(dest);
+
+			dest = DEST + 'other'
+			options = _.extend({}, OPTIONS, {
+				dest: dest
+			})
+			webfontsGenerator(options, function(err) {
+				if (err) return done(new Error(err))
+
+				var newHash = getHash(dest);
+
+				assert(hash === newHash)
+				done(null)
+			})
+		})
+	})
+
 	describe('custom templates', function() {
 		var TEMPLATE = path.join(__dirname, 'customTemplate.hbs')
 		var TEMPLATE_OPTIONS = {
@@ -174,6 +211,45 @@ describe('webfont', function() {
 			})
 		})
 	})
+
+	describe('custom context', function() {
+		var TEMPLATE = path.join(__dirname, 'customContextTemplate.hbs')
+		var TEMPLATE_OPTIONS = {
+			option: 'TEST'
+		}
+		it('uses custom html context', function (done) {
+			var options = _.extend({}, OPTIONS, {
+				html: true,
+				htmlTemplate: TEMPLATE,
+				templateOptions: TEMPLATE_OPTIONS,
+				htmlContext: function (context) {
+					context.hello = 'world'
+				},
+			})
+			webfontsGenerator(options, function (err) {
+				if (err) return done(err)
+				var htmlFile = fs.readFileSync(path.join(DEST, FONT_NAME + '.html'), 'utf8')
+				assert.equal(htmlFile, 'world')
+				done(null)
+			})
+		});
+
+		it('uses custom css context', function (done) {
+			var options = _.extend({}, OPTIONS, {
+				cssTemplate: TEMPLATE,
+				templateOptions: TEMPLATE_OPTIONS,
+				cssContext: function (context) {
+					context.hello = 'world'
+				},
+			})
+			webfontsGenerator(options, function (err) {
+				if (err) return done(err)
+				var cssFile = fs.readFileSync(path.join(DEST, FONT_NAME + '.css'), 'utf8')
+				assert.equal(cssFile, 'world')
+				done(null)
+			})
+		})
+	});
 
 	describe('scss template', function() {
 		var TEST_SCSS_SINGLE = path.join(__dirname, 'scss', 'singleFont.scss')

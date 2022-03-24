@@ -9,3 +9,9 @@ temp
 Session.vim
 .netrwhist
 *~
+
+.DS_Store
+
+tests/dest/
+tests/destother/
+tests/destsome/
