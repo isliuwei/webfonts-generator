@@ -1,4 +1,5 @@
 var fs = require('fs')
+var path = require('path')
 var _ = require('underscore')
 var Q = require('q')
 
@@ -36,12 +37,12 @@ var generators = {
 								style: 'position: absolute; width: 0px; height: 0px; overflow: hidden;'
 							}
 						},
-						generateSymbolId: function (path) {
-							let symbolId = '';
-							path.replace(/([^\\/]+)\.([^\\/]+)/i, (_, $1) => {
-								symbolId = `${clsPre}${$1}`;
-							});
-							return symbolId;
+						generateSymbolId: function (file) {
+							// let symbolId = '';
+							// path.replace(/([^\\/]+)\.([^\\/]+)/i, (_, $1) => {
+							// 	symbolId = `${clsPre}${$1}`;
+							// });
+							return clsPre + path.basename(file, path.extname(file));
 						}
 					}
 				)

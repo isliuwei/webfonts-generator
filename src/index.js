@@ -2,6 +2,7 @@ var fs = require('fs')
 var path = require('path')
 var mkdirp = require('mkdirp')
 var _ = require('underscore')
+var Prettier = require('prettier');
 
 var generateFonts = require('./generateFonts')
 var renderCss = require('./renderCss')
@@ -12,6 +13,7 @@ var TEMPLATES = {
 	css: path.join(TEMPLATES_DIR, 'css.hbs'),
 	scss: path.join(TEMPLATES_DIR, 'scss.hbs'),
 	html: path.join(TEMPLATES_DIR, 'html.hbs'),
+	info: path.join(TEMPLATES_DIR, 'info.hbs'),
 	symbol: path.join(TEMPLATES_DIR, 'symbol.hbs')
 }
 
@@ -41,8 +43,20 @@ var DEFAULT_OPTIONS = {
 	 */
 	startCodepoint: 0xF101,
 	ligature: true,
-	normalize: true
+	normalize: true,
+	outputInfo: true
 }
+
+
+var OUTPUT_INFO = [];
+
+var prettier = {
+	parser: 'babel',
+	printWidth: 120,
+	singleQuote: true,
+	tabWidth: 4,
+	bracketSpacing: false
+};
 
 var webfont = function (options, done) {
 	if (options.cssFontsPath) {
@@ -80,6 +94,7 @@ var webfont = function (options, done) {
 
 	options.templateOptions = _.extend({}, DEFAULT_TEMPLATE_OPTIONS, options.templateOptions)
 
+
 	// Generates codepoints starting from `options.startCodepoint`,
 	// skipping codepoints explicitly specified in `options.codepoints`
 	var currentCodepoint = options.startCodepoint
@@ -98,6 +113,18 @@ var webfont = function (options, done) {
 			options.codepoints[name] = getNextCodepoint()
 		}
 	})
+
+	// infolist
+	_.each(options.names, function(name) {
+		let item = {};
+		item.name = name;
+		item.unicode = `&#x${options.codepoints[name].toString(16)};`;
+		item.symbolId = options.templateOptions.classPrefix + name;
+		item.className = `${options.templateOptions.baseSelector.slice(1)} ${options.templateOptions.classPrefix}${name}`;
+		OUTPUT_INFO.push(item);
+	});
+	options.infos = OUTPUT_INFO;
+
 
 	// TODO output
 	generateFonts(options)
@@ -130,10 +157,13 @@ function writeResult(fonts, options) {
 			var filepath = path.join(options.dest, options.fontName + 'Symbol.svg')
 			writeFile(content, filepath)
 			// gen symbol script
-			var symbolSource = fs.readFileSync(TEMPLATES.symbol, 'utf8')
-			var symbolScript = symbolSource.replace('<% SVG_SYMBOL_CODE %>', content)
-			var symbolfilepath = path.join(options.dest, options.fontName + 'Symbol.js')
-			writeFile(symbolScript, symbolfilepath)
+			genFile(
+				TEMPLATES.symbol,
+				'<% SVG_SYMBOL_CODE %>',
+				content,
+				path.join(options.dest, options.fontName + 'Symbol.js'),
+				false
+			);
 			return;
 		}
 		var filepath = path.join(options.dest, options.fontName + '.' + type)
@@ -147,6 +177,23 @@ function writeResult(fonts, options) {
 		var html = renderHtml(options)
 		writeFile(html, options.htmlDest)
 	}
+	if (options.outputInfo) {
+		genFile(
+			TEMPLATES.info,
+			'<% ICON_INFO %>',
+			options.infos,
+			path.join(options.dest, 'iconfontInfo.js'),
+			true
+		);
+	}
+
+}
+
+function genFile(tpl, reg, cnt, dir, format = false) {
+	var template = fs.readFileSync(tpl, 'utf8')
+	var rawRes = template.replace(reg, JSON.stringify(cnt, null, 2));
+	var result = format ? Prettier.format(rawRes, prettier) : rawRes;
+	writeFile(result, dir)
 }
 
 webfont.templates = TEMPLATES
